@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>겨울잠 질문함</title>
+<!--
+================================================================
+ 겨울잠 질문함 (Telegram 구독자 양방향 소통 웹앱)
+ - 설정은 아래 CONFIG 한 곳만 바꾸면 됩니다.
+ - Supabase 설정이 비어 있으면 '데모 모드'(브라우저 메모리)로 동작합니다.
+
+ [Supabase 테이블 생성 SQL]
+ create table questions (
+   id uuid primary key default gen_random_uuid(),
+   nickname text,
+   category text not null,
+   content text not null,
+   votes int default 0,
+   status text default 'new',       -- new | planned | answered
+   answer text,
+   created_at timestamptz default now()
+ );
+ alter table questions enable row level security;
+ create policy "read"   on questions for select using (true);
+ create policy "insert" on questions for insert with check (true);
+ create policy "update" on questions for update using (true);
+ create policy "delete" on questions for delete using (true);
+================================================================
+-->
+<style>
+  :root{
+    --bg:#0E1520; --bg-2:#121C29; --surface:#16202D; --surface-2:#1C2836;
+    --line:#25364A; --line-soft:#1E2B3B;
+    --text:#E7EEF6; --muted:#8CA0B8; --dim:#61748C;
+    --amber:#F0B453; --amber-dim:#8a6a2f;
+    --ok:#7FD0A6; --plan:#7FB4E8;
+    --radius:14px;
+    --font:"Pretendard","Apple SD Gothic Neo","Malgun Gothic","Segoe UI",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:
+      radial-gradient(900px 420px at 50% -12%, #1A2838 0%, rgba(26,40,56,0) 70%),
+      var(--bg);
+    color:var(--text); font-family:var(--font);
+    -webkit-font-smoothing:antialiased; line-height:1.55;
+    padding:0 16px 72px;
+  }
+  .wrap{max-width:620px;margin:0 auto}
+
+  /* ---------- header ---------- */
+  header{padding:40px 0 20px}
+  .kicker{font-size:12.5px;color:var(--dim);letter-spacing:.02em;margin:0 0 14px}
+  .kicker b{color:var(--amber);font-weight:600}
+  h1{
+    margin:0; font-size:27px; line-height:1.34; font-weight:700; letter-spacing:-.02em;
+  }
+  h1 .soft{display:block;color:var(--muted);font-weight:400;font-size:15.5px;margin-top:10px;letter-spacing:0}
+
+  .stats{display:flex;gap:0;margin:22px 0 0;border:1px solid var(--line-soft);border-radius:var(--radius);overflow:hidden;background:var(--bg-2)}
+  .stat{flex:1;padding:12px 14px;border-right:1px solid var(--line-soft)}
+  .stat:last-child{border-right:0}
+  .stat .n{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+  .stat .l{font-size:11.5px;color:var(--dim);margin-top:2px}
+
+  /* ---------- tabs ---------- */
+  nav{display:flex;gap:22px;margin:26px 0 18px;border-bottom:1px solid var(--line-soft)}
+  nav button{
+    background:none;border:0;color:var(--dim);font-family:inherit;font-size:14.5px;font-weight:500;
+    padding:0 0 11px;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;
+  }
+  nav button[aria-selected="true"]{color:var(--text);border-bottom-color:var(--amber)}
+  nav button:focus-visible{outline:2px solid var(--amber);outline-offset:3px;border-radius:3px}
+
+  /* ---------- form ---------- */
+  .panel{display:none}
+  .panel.on{display:block}
+  .field{margin-bottom:18px}
+  .field > label{display:block;font-size:13px;color:var(--muted);margin-bottom:8px}
+  .chips{display:flex;flex-wrap:wrap;gap:7px}
+  .chip{
+    border:1px solid var(--line);background:var(--surface);color:var(--muted);
+    font-family:inherit;font-size:13.5px;padding:7px 13px;border-radius:999px;cursor:pointer;
+  }
+  .chip[aria-pressed="true"]{background:var(--amber);border-color:var(--amber);color:#1A1206;font-weight:600}
+  .chip:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+  input[type=text],textarea{
+    width:100%;background:var(--surface);border:1px solid var(--line);color:var(--text);
+    font-family:inherit;font-size:15px;padding:12px 14px;border-radius:12px;resize:vertical;
+  }
+  input[type=text]::placeholder,textarea::placeholder{color:#55677E}
+  input[type=text]:focus,textarea:focus{outline:none;border-color:var(--amber-dim);background:var(--surface-2)}
+  .count{text-align:right;font-size:11.5px;color:var(--dim);margin-top:6px;font-variant-numeric:tabular-nums}
+  .row{display:flex;gap:10px;align-items:center}
+  .send{
+    width:100%;margin-top:4px;background:var(--amber);color:#1A1206;border:0;border-radius:12px;
+    font-family:inherit;font-size:15.5px;font-weight:700;padding:14px;cursor:pointer;
+  }
+  .send:disabled{background:#2B3849;color:#5C6D84;cursor:not-allowed}
+  .send:focus-visible{outline:2px solid #fff;outline-offset:2px}
+  .hint{font-size:12.5px;color:var(--dim);margin-top:12px;line-height:1.6}
+
+  /* ---------- list ---------- */
+  .bar{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px}
+  .sort{display:flex;gap:3px;background:var(--bg-2);border:1px solid var(--line-soft);border-radius:10px;padding:3px}
+  .sort button{
+    background:none;border:0;color:var(--dim);font-family:inherit;font-size:12.5px;padding:6px 11px;border-radius:7px;cursor:pointer
+  }
+  .sort button[aria-pressed="true"]{background:var(--surface-2);color:var(--text)}
+  .filter{background:var(--bg-2);border:1px solid var(--line-soft);color:var(--muted);font-family:inherit;font-size:12.5px;padding:7px 10px;border-radius:10px}
+
+  .card{display:flex;gap:14px;padding:16px 0;border-bottom:1px solid var(--line-soft)}
+  .vote{flex:0 0 46px;display:flex;flex-direction:column;align-items:center;gap:3px;
+    background:none;border:1px solid var(--line);border-radius:12px;padding:9px 0;cursor:pointer;color:var(--muted);font-family:inherit;height:fit-content}
+  .vote .v-n{font-size:16px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--text)}
+  .vote .v-l{font-size:10.5px;color:var(--dim)}
+  .vote[data-voted="1"]{border-color:var(--amber);background:rgba(240,180,83,.1)}
+  .vote[data-voted="1"] .v-n{color:var(--amber)}
+  .vote:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+  .body{flex:1;min-width:0}
+  .meta{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--dim);margin-bottom:6px;flex-wrap:wrap}
+  .tag{color:var(--amber);font-weight:600}
+  .badge{font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid}
+  .badge.plan{color:var(--plan);border-color:#2F4D6B}
+  .badge.done{color:var(--ok);border-color:#2C5744}
+  .q{font-size:15px;white-space:pre-wrap;word-break:break-word;margin:0}
+  .ans{margin-top:11px;padding:12px 14px;background:var(--surface);border-left:2px solid var(--ok);border-radius:0 10px 10px 0;font-size:14px;color:#D6E4E0;white-space:pre-wrap}
+  .ans .who{display:block;font-size:11.5px;color:var(--ok);margin-bottom:5px;font-weight:600}
+  .empty{padding:48px 8px;text-align:center;color:var(--dim);font-size:14px;line-height:1.8}
+
+  /* ---------- admin ---------- */
+  .lock{max-width:320px;margin:40px auto;text-align:center}
+  .adm-actions{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+  .mini{background:var(--surface);border:1px solid var(--line);color:var(--muted);font-family:inherit;font-size:12px;padding:6px 10px;border-radius:8px;cursor:pointer}
+  .mini:hover{border-color:var(--amber-dim);color:var(--text)}
+  .mini.danger:hover{border-color:#7a3b3b;color:#E89A9A}
+  .heat{margin:0 0 22px;padding:0;list-style:none}
+  .heat li{display:flex;align-items:center;gap:10px;font-size:13px;padding:5px 0}
+  .heat .hl{flex:0 0 92px;color:var(--muted)}
+  .heat .hb{flex:1;height:7px;background:var(--surface-2);border-radius:4px;overflow:hidden}
+  .heat .hb span{display:block;height:100%;background:var(--amber);opacity:.85}
+  .heat .hn{flex:0 0 28px;text-align:right;color:var(--dim);font-variant-numeric:tabular-nums}
+  h2{font-size:15px;font-weight:600;margin:26px 0 12px;color:var(--text)}
+  .out{width:100%;min-height:220px;font-size:13.5px;line-height:1.7}
+  .sysnote{font-size:12px;color:var(--dim);margin-top:10px}
+
+  .toast{
+    position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(8px);
+    background:var(--amber);color:#1A1206;font-size:13.5px;font-weight:600;
+    padding:11px 20px;border-radius:999px;opacity:0;pointer-events:none;transition:.22s;z-index:50;
+  }
+  .toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+  @media (max-width:420px){ h1{font-size:23px} .stat .n{font-size:18px} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <p class="kicker">겨울잠 오피니언 · <b id="live">접수 중</b></p>
+    <h1>이번 주, 무엇이 제일 막막하신가요?
+      <span class="soft">남겨주신 질문 중 공감이 많은 것부터 채널에서 다룹니다. 익명으로 남겨도 됩니다.</span>
+    </h1>
+    <div class="stats">
+      <div class="stat"><div class="n" id="s-total">0</div><div class="l">전체 질문</div></div>
+      <div class="stat"><div class="n" id="s-week">0</div><div class="l">이번 주 접수</div></div>
+      <div class="stat"><div class="n" id="s-done">0</div><div class="l">답변 완료</div></div>
+    </div>
+  </header>
+
+  <nav role="tablist">
+    <button role="tab" id="t-ask" aria-selected="true" aria-controls="p-ask">질문 남기기</button>
+    <button role="tab" id="t-all" aria-selected="false" aria-controls="p-all">모두의 질문</button>
+    <button role="tab" id="t-adm" aria-selected="false" aria-controls="p-adm">운영자</button>
+  </nav>
+
+  <!-- 질문 남기기 -->
+  <section class="panel on" id="p-ask" role="tabpanel" aria-labelledby="t-ask">
+    <div class="field">
+      <label id="lb-cat">어떤 이야기인가요?</label>
+      <div class="chips" id="cats" role="group" aria-labelledby="lb-cat"></div>
+    </div>
+    <div class="field">
+      <label for="nick">닉네임 (비워두면 익명)</label>
+      <input type="text" id="nick" maxlength="12" placeholder="익명">
+    </div>
+    <div class="field">
+      <label for="content">질문 · 고민 · 요청</label>
+      <textarea id="content" rows="6" maxlength="400" placeholder="예) 목돈 3천만 원이 생겼는데 지금 한 번에 넣는 게 나은지, 나눠 사는 게 나은지 매번 헷갈립니다."></textarea>
+      <div class="count"><span id="cnt">0</span> / 400</div>
+    </div>
+    <button class="send" id="submit">질문 남기기</button>
+    <p class="hint">· 개인 계좌번호나 연락처는 적지 마세요. 누구나 볼 수 있는 공간입니다.<br>
+      · 비슷한 질문이 이미 있다면 ‘모두의 질문’에서 공감을 눌러주세요. 공감이 쌓일수록 먼저 다룹니다.</p>
+  </section>
+
+  <!-- 모두의 질문 -->
+  <section class="panel" id="p-all" role="tabpanel" aria-labelledby="t-all">
+    <div class="bar">
+      <div class="sort" role="group" aria-label="정렬">
+        <button id="sort-hot" aria-pressed="true">공감순</button>
+        <button id="sort-new" aria-pressed="false">최신순</button>
+      </div>
+      <select class="filter" id="fcat"><option value="">전체 분야</option></select>
+    </div>
+    <div id="list"></div>
+  </section>
+
+  <!-- 운영자 -->
+  <section class="panel" id="p-adm" role="tabpanel" aria-labelledby="t-adm">
+    <div class="lock" id="lock">
+      <div class="field">
+        <label for="pw">운영자 비밀번호</label>
+        <input type="text" id="pw" placeholder="비밀번호">
+      </div>
+      <button class="send" id="unlock">들어가기</button>
+    </div>
+    <div id="admin" style="display:none">
+      <h2 style="margin-top:8px">분야별 접수량</h2>
+      <ul class="heat" id="heat"></ul>
+      <h2>다음에 다룰 주제 후보</h2>
+      <div id="alist"></div>
+      <h2>주간 요약</h2>
+      <div class="row">
+        <button class="mini" id="ai">AI로 요약 만들기</button>
+        <button class="mini" id="copy">텔레그램용 복사</button>
+      </div>
+      <textarea class="out" id="out" placeholder="요약을 만들면 여기에 채워집니다. 바로 텔레그램에 붙여 넣을 수 있는 형태로 나옵니다."></textarea>
+      <p class="sysnote" id="sysnote"></p>
+    </div>
+  </section>
+
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* =============== 1. 설정 =============== */
+const CONFIG = {
+  SUPABASE_URL: "",          // 예: https://xxxx.supabase.co
+  SUPABASE_KEY: "",          // anon public key
+  ADMIN_PW:     "gyeouljam", // 운영자 비밀번호 (반드시 변경)
+  CATEGORIES:   ["미국주식","부동산","계좌·절세","투자원칙·멘탈","공모주","기타"]
+};
+
+/* =============== 2. 저장소 =============== */
+const live = CONFIG.SUPABASE_URL && CONFIG.SUPABASE_KEY;
+const H = () => ({
+  "apikey": CONFIG.SUPABASE_KEY,
+  "Authorization": "Bearer " + CONFIG.SUPABASE_KEY,
+  "Content-Type": "application/json",
+  "Prefer": "return=representation"
+});
+const REST = () => CONFIG.SUPABASE_URL.replace(/\/$/,"") + "/rest/v1/questions";
+
+let demo = [
+  {id:"d1",nickname:"직장인8년차",category:"투자원칙·멘탈",content:"조정 올 때마다 다 팔고 싶어집니다. 버티는 기준을 어떻게 정해야 할까요?",votes:12,status:"planned",answer:null,created_at:new Date(Date.now()-864e5).toISOString()},
+  {id:"d2",nickname:null,category:"계좌·절세",content:"ISA 만기 자금을 연금저축으로 옮기는 게 나은지, 그냥 일반계좌로 굴리는 게 나은지 모르겠습니다.",votes:8,status:"new",answer:null,created_at:new Date(Date.now()-36e5).toISOString()},
+  {id:"d3",nickname:"평촌러",category:"부동산",content:"전세 만기가 내년인데 지금 갈아타기를 준비해야 할지, 한 사이클 더 기다릴지 고민입니다.",votes:5,status:"new",answer:null,created_at:new Date().toISOString()}
+];
+
+const Store = {
+  async list(){
+    if(!live) return [...demo];
+    const r = await fetch(REST()+"?select=*&order=created_at.desc",{headers:H()});
+    if(!r.ok) throw new Error("불러오기 실패 ("+r.status+")");
+    return await r.json();
+  },
+  async add(row){
+    if(!live){ const x={id:"d"+Date.now(),votes:0,status:"new",answer:null,created_at:new Date().toISOString(),...row}; demo.unshift(x); return x; }
+    const r = await fetch(REST(),{method:"POST",headers:H(),body:JSON.stringify(row)});
+    if(!r.ok) throw new Error("등록 실패 ("+r.status+")");
+    return (await r.json())[0];
+  },
+  async patch(id,fields){
+    if(!live){ const i=demo.findIndex(d=>d.id===id); if(i>-1) demo[i]={...demo[i],...fields}; return; }
+    const r = await fetch(REST()+"?id=eq."+id,{method:"PATCH",headers:H(),body:JSON.stringify(fields)});
+    if(!r.ok) throw new Error("수정 실패 ("+r.status+")");
+  },
+  async remove(id){
+    if(!live){ demo = demo.filter(d=>d.id!==id); return; }
+    const r = await fetch(REST()+"?id=eq."+id,{method:"DELETE",headers:H()});
+    if(!r.ok) throw new Error("삭제 실패 ("+r.status+")");
+  }
+};
+
+/* =============== 3. 상태 =============== */
+let rows=[], picked=CONFIG.CATEGORIES[0], sort="hot", filter="", isAdmin=false, lastSend=0;
+const voted = new Set();               // 이 브라우저 세션의 중복 공감 방지
+const $ = s => document.querySelector(s);
+const toast = (m)=>{ const t=$("#toast"); t.textContent=m; t.classList.add("on"); setTimeout(()=>t.classList.remove("on"),1900); };
+const esc = s => (s||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const ago = d => { const m=(Date.now()-new Date(d))/6e4;
+  if(m<1) return "방금"; if(m<60) return Math.floor(m)+"분 전";
+  if(m<1440) return Math.floor(m/60)+"시간 전"; return Math.floor(m/1440)+"일 전"; };
+const thisWeek = d => (Date.now()-new Date(d))/864e5 < 7;
+
+/* =============== 4. 렌더 =============== */
+function renderChips(){
+  $("#cats").innerHTML = CONFIG.CATEGORIES.map(c=>
+    `<button class="chip" type="button" data-c="${esc(c)}" aria-pressed="${c===picked}">${esc(c)}</button>`).join("");
+  $("#fcat").innerHTML = `<option value="">전체 분야</option>` +
+    CONFIG.CATEGORIES.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join("");
+}
+function stats(){
+  $("#s-total").textContent = rows.length;
+  $("#s-week").textContent  = rows.filter(r=>thisWeek(r.created_at)).length;
+  $("#s-done").textContent  = rows.filter(r=>r.status==="answered").length;
+}
+function sorted(){
+  let a = filter ? rows.filter(r=>r.category===filter) : [...rows];
+  return sort==="hot" ? a.sort((x,y)=>(y.votes||0)-(x.votes||0) || new Date(y.created_at)-new Date(x.created_at))
+                      : a.sort((x,y)=>new Date(y.created_at)-new Date(x.created_at));
+}
+function card(r){
+  const badge = r.status==="answered" ? `<span class="badge done">답변 완료</span>`
+              : r.status==="planned"  ? `<span class="badge plan">다룰 예정</span>` : "";
+  const ans = r.answer ? `<div class="ans"><span class="who">겨울잠 답변</span>${esc(r.answer)}</div>` : "";
+  const adm = isAdmin ? `<div class="adm-actions">
+      <button class="mini" data-act="plan" data-id="${r.id}">다룰 예정</button>
+      <button class="mini" data-act="answer" data-id="${r.id}">답변 쓰기</button>
+      <button class="mini" data-act="reset" data-id="${r.id}">상태 해제</button>
+      <button class="mini danger" data-act="del" data-id="${r.id}">삭제</button></div>` : "";
+  return `<article class="card">
+    <button class="vote" data-vote="${r.id}" data-voted="${voted.has(r.id)?1:0}" aria-label="공감하기">
+      <span class="v-n">${r.votes||0}</span><span class="v-l">공감</span></button>
+    <div class="body">
+      <div class="meta"><span class="tag">${esc(r.category)}</span><span>${esc(r.nickname||"익명")}</span>
+        <span>${ago(r.created_at)}</span>${badge}</div>
+      <p class="q">${esc(r.content)}</p>${ans}${adm}
+    </div></article>`;
+}
+function renderList(){
+  const a = sorted();
+  $("#list").innerHTML = a.length ? a.map(card).join("")
+    : `<div class="empty">아직 올라온 질문이 없습니다.<br>첫 질문을 남겨보세요.</div>`;
+}
+function renderAdmin(){
+  if(!isAdmin) return;
+  const counts = CONFIG.CATEGORIES.map(c=>({c,n:rows.filter(r=>r.category===c).length}));
+  const max = Math.max(1,...counts.map(x=>x.n));
+  $("#heat").innerHTML = counts.map(x=>
+    `<li><span class="hl">${esc(x.c)}</span><span class="hb"><span style="width:${x.n/max*100}%"></span></span><span class="hn">${x.n}</span></li>`).join("");
+  const top = [...rows].filter(r=>r.status!=="answered")
+    .sort((x,y)=>(y.votes||0)-(x.votes||0)).slice(0,8);
+  $("#alist").innerHTML = top.length ? top.map(card).join("")
+    : `<div class="empty">처리할 질문이 없습니다.</div>`;
+}
+function renderAll(){ stats(); renderList(); renderAdmin(); }
+
+/* =============== 5. 동작 =============== */
+async function load(silent){
+  try{ rows = await Store.list(); renderAll(); $("#live").textContent = live?"접수 중":"데모 모드"; }
+  catch(e){ if(!silent) toast(e.message); $("#live").textContent="연결 확인 필요"; }
+}
+$("#cats").addEventListener("click", e=>{
+  const b=e.target.closest(".chip"); if(!b) return;
+  picked=b.dataset.c;
+  document.querySelectorAll(".chip").forEach(c=>c.setAttribute("aria-pressed", c===b));
+});
+$("#content").addEventListener("input", e=>{ $("#cnt").textContent = e.target.value.length; });
+$("#submit").addEventListener("click", async ()=>{
+  const content = $("#content").value.trim();
+  if(content.length < 5){ toast("조금만 더 구체적으로 적어주세요"); return; }
+  if(Date.now()-lastSend < 20000){ toast("20초 뒤에 다시 보낼 수 있습니다"); return; }
+  const btn = $("#submit"); btn.disabled = true; btn.textContent = "보내는 중";
+  try{
+    await Store.add({nickname: $("#nick").value.trim()||null, category: picked, content});
+    lastSend = Date.now(); $("#content").value=""; $("#cnt").textContent="0";
+    await load(true); switchTab("all"); toast("질문이 등록됐습니다");
+  }catch(e){ toast(e.message); }
+  btn.disabled=false; btn.textContent="질문 남기기";
+});
+document.addEventListener("click", async e=>{
+  const v = e.target.closest("[data-vote]");
+  if(v){
+    const id=v.dataset.vote; if(voted.has(id)){ toast("이미 공감했습니다"); return; }
+    const r = rows.find(x=>x.id===id); if(!r) return;
+    voted.add(id); r.votes=(r.votes||0)+1; renderAll();
+    try{ await Store.patch(id,{votes:r.votes}); }catch(err){ toast(err.message); }
+    return;
+  }
+  const a = e.target.closest("[data-act]"); if(!a) return;
+  const id=a.dataset.id, r=rows.find(x=>x.id===id); if(!r) return;
+  try{
+    if(a.dataset.act==="plan")   { await Store.patch(id,{status:"planned"}); }
+    if(a.dataset.act==="reset")  { await Store.patch(id,{status:"new"}); }
+    if(a.dataset.act==="del")    { if(!confirm("삭제할까요?")) return; await Store.remove(id); }
+    if(a.dataset.act==="answer") {
+      const t = prompt("답변 내용", r.answer||""); if(t===null) return;
+      await Store.patch(id,{answer:t.trim()||null, status:t.trim()?"answered":"new"});
+    }
+    await load(true); toast("반영했습니다");
+  }catch(err){ toast(err.message); }
+});
+$("#sort-hot").onclick=()=>{sort="hot";$("#sort-hot").setAttribute("aria-pressed",true);$("#sort-new").setAttribute("aria-pressed",false);renderList();};
+$("#sort-new").onclick=()=>{sort="new";$("#sort-new").setAttribute("aria-pressed",true);$("#sort-hot").setAttribute("aria-pressed",false);renderList();};
+$("#fcat").onchange = e=>{ filter=e.target.value; renderList(); };
+
+/* 탭 전환 */
+const TABS = {ask:["#t-ask","#p-ask"], all:["#t-all","#p-all"], adm:["#t-adm","#p-adm"]};
+function switchTab(k){
+  for(const [key,[t,p]] of Object.entries(TABS)){
+    $(t).setAttribute("aria-selected", key===k);
+    $(p).classList.toggle("on", key===k);
+  }
+}
+$("#t-ask").onclick=()=>switchTab("ask");
+$("#t-all").onclick=()=>switchTab("all");
+$("#t-adm").onclick=()=>switchTab("adm");
+
+$("#unlock").onclick=()=>{
+  if($("#pw").value === CONFIG.ADMIN_PW){ isAdmin=true; $("#lock").style.display="none"; $("#admin").style.display="block"; renderAll(); }
+  else toast("비밀번호가 다릅니다");
+};
+
+/* 요약 */
+function plain(){
+  const top = [...rows].sort((x,y)=>(y.votes||0)-(x.votes||0)).slice(0,40);
+  return top.map(r=>`[${r.category}|공감 ${r.votes||0}|${r.status}] ${r.content}`).join("\n");
+}
+$("#copy").onclick=async()=>{
+  const t = $("#out").value.trim() || plain();
+  try{ await navigator.clipboard.writeText(t); toast("복사했습니다"); }
+  catch{ $("#out").select(); toast("Ctrl+C로 복사하세요"); }
+};
+$("#ai").onclick=async()=>{
+  if(!rows.length){ toast("요약할 질문이 없습니다"); return; }
+  const btn=$("#ai"); btn.disabled=true; btn.textContent="요약하는 중";
+  const prompt = `아래는 투자 채널 구독자들이 남긴 질문 목록이다. 형식: [분야|공감수|상태] 내용
+
+${plain()}
+
+다음 형식의 한국어 텍스트만 출력하라. 마크다운 기호, 표, 머리말 없이 텔레그램에 바로 붙여 넣을 수 있게 쓴다. 전체 1,200자 이내.
+
+이번 주 질문 정리
+
+1. 가장 많이 겹친 고민 3가지 — 각각 한 줄 요약 + 몇 건이 비슷한 맥락인지
+2. 다음에 다룰 주제 5개 — 콘텐츠 제목 형태로, 뒤에 (공감 n) 표기
+3. 아직 답 안 한 것 중 지금 바로 짧게 답해줄 수 있는 질문 2개와 두 줄짜리 답
+4. 새로 보이는 신호 — 지난 흐름과 달라진 관심사 한 줄`;
+  try{
+    const res = await fetch("https://api.anthropic.com/v1/messages",{
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({model:"claude-sonnet-4-6",max_tokens:1000,messages:[{role:"user",content:prompt}]})
+    });
+    if(!res.ok) throw new Error("x");
+    const data = await res.json();
+    $("#out").value = data.content.filter(c=>c.type==="text").map(c=>c.text).join("\n");
+    $("#sysnote").textContent="";
+  }catch(err){
+    $("#out").value = prompt;
+    $("#sysnote").textContent = "이 서버에서는 AI 호출이 막혀 있습니다. 위 내용을 그대로 복사해 Claude에 붙여 넣으면 같은 결과를 받습니다.";
+  }
+  btn.disabled=false; btn.textContent="AI로 요약 만들기";
+};
+
+/* 시작 + 자동 새로고침 */
+renderChips(); load();
+setInterval(()=>{ if(!document.hidden) load(true); }, 8000);
+</script>
+</body>
+</html>
